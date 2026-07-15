@@ -13,7 +13,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/api/:path*",
-        headers: [{ key: "Content-Type", value: "application/json" }],
+        headers: [{ key: "Content-Type", value: "multipart/form-data" }],
       },
     ];
   },
