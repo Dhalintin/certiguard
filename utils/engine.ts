@@ -88,34 +88,99 @@ async function runELA(imageBuffer: Buffer): Promise<ELAResult> {
 
 // ─── OCR ─────────────────────────────────────────────────────────────────────
 
+// async function runOCR(imageBuffer: Buffer): Promise<OCRResult> {
+//   const processed = await sharp(imageBuffer)
+//     .greyscale()
+//     .normalise()
+//     .sharpen({ sigma: 1.5 })
+//     .toBuffer();
+
+//   const { data } = await Tesseract.recognize(processed, "eng", {
+//     logger: () => {},
+//   });
+
+//   const words = data.words.map((w: any) => ({
+//     text: w.text,
+//     confidence: w.confidence,
+//     bbox: w.bbox,
+//   }));
+
+//   const avgConf =
+//     words.length > 0
+//       ? words.reduce((s: number, w: any) => s + w.confidence, 0) / words.length
+//       : 0;
+
+//   return {
+//     text: data.text,
+//     confidence: Math.round(avgConf),
+//     words,
+//     detectedFields: extractFields(data.text),
+//   };
+// }
+
+// utils/engine.ts
 async function runOCR(imageBuffer: Buffer): Promise<OCRResult> {
-  const processed = await sharp(imageBuffer)
-    .greyscale()
-    .normalise()
-    .sharpen({ sigma: 1.5 })
-    .toBuffer();
+  const start = Date.now();
 
-  const { data } = await Tesseract.recognize(processed, "eng", {
-    logger: () => {},
-  });
+  try {
+    const formData = new FormData();
+    formData.append("file", new Blob([imageBuffer]), "certificate.jpg");
+    formData.append("language", "eng");
+    formData.append("isOverlayRequired", "false");
+    formData.append("OCREngine", "2"); // Better accuracy
+    formData.append("scale", "true");
+    formData.append("detectOrientation", "true");
 
-  const words = data.words.map((w: any) => ({
-    text: w.text,
-    confidence: w.confidence,
-    bbox: w.bbox,
-  }));
+    const response = await fetch("https://api.ocr.space/parse/image", {
+      method: "POST",
+      headers: {
+        apikey: process.env.OCR_SPACE_API_KEY!, // ← Add this to .env
+      },
+      body: formData,
+    });
 
-  const avgConf =
-    words.length > 0
-      ? words.reduce((s: number, w: any) => s + w.confidence, 0) / words.length
-      : 0;
+    if (!response.ok) {
+      throw new Error(`OCR API failed: ${response.status}`);
+    }
 
-  return {
-    text: data.text,
-    confidence: Math.round(avgConf),
-    words,
-    detectedFields: extractFields(data.text),
-  };
+    const data = await response.json();
+
+    if (data.IsErroredOnProcessing) {
+      throw new Error(data.ErrorMessage || "OCR processing failed");
+    }
+
+    const parsedText = data.ParsedResults?.[0]?.ParsedText || "";
+    const confidence = data.ParsedResults?.[0]?.TextOverlay?.Lines?.length
+      ? 75
+      : 60; // Rough confidence
+
+    const words = parsedText
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((text: any) => ({
+        text,
+        confidence: 70,
+        bbox: { x0: 0, y0: 0, x1: 0, y1: 0 },
+      }));
+
+    console.log(`OCR completed in ${Date.now() - start}ms`);
+
+    return {
+      text: parsedText,
+      confidence: Math.round(confidence),
+      words,
+      detectedFields: extractFields(parsedText),
+    };
+  } catch (error) {
+    console.error("OCR API Error:", error);
+    // Fallback: return empty result instead of crashing
+    return {
+      text: "",
+      confidence: 0,
+      words: [],
+      detectedFields: {},
+    };
+  }
 }
 
 function extractFields(text: string): DetectedFields {
